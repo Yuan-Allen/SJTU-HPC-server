@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::Result;
 use ssh2::Session;
+use tokio::time;
 
 pub struct GpuServer {
     pub username: String,
@@ -37,9 +38,11 @@ impl GpuServer {
         }
     }
 
-    pub async fn run(&self, login: &Session, data: &Session) -> Result<()> {
+    pub async fn run(&self, login: &Session, data: &Session) -> Result<String> {
         self.exec(login, "ls").await?;
+        // upload
         self.upload_resources(data).await?;
+        // unzip
         self.exec(
             login,
             format!(
@@ -50,12 +53,24 @@ impl GpuServer {
             .as_str(),
         )
         .await?;
+        // compile
         self.exec(
             login,
-            format!("cd {} && {}", self.remote_dir, self.compile_script.as_str()).as_str(),
+            format!("cd {} && {}", self.remote_dir, self.compile_script).as_str(),
         )
         .await?;
-        Ok(())
+        // submit job
+        let job_id = self
+            .exec(
+                login,
+                format!("cd {} && sbatch {}.slurm", self.remote_dir, self.job_name).as_str(),
+            )
+            .await?;
+        let job_id = scan_fmt!(job_id.as_str(), "Submitted batch job {}", String)?;
+        // wait for the result
+        let res = self.get_result(login, job_id.as_str()).await?;
+
+        Ok(res)
     }
 
     pub async fn connect(&self, login_addr: &str, data_addr: &str) -> (Session, Session) {
@@ -83,12 +98,33 @@ impl GpuServer {
         );
         let result = fs::read(local)?;
         let mut remote_file = sess.scp_send(remote, 0o644, result.len() as u64, None)?;
-        remote_file.write_all(&result).unwrap();
+        remote_file.write_all(&result)?;
         // Close the channel and wait for the whole content to be tranferred
-        remote_file.send_eof().unwrap();
-        remote_file.wait_eof().unwrap();
-        remote_file.close().unwrap();
-        remote_file.wait_close().unwrap();
+        remote_file.send_eof()?;
+        remote_file.wait_eof()?;
+        remote_file.close()?;
+        remote_file.wait_close()?;
+        Ok(())
+    }
+
+    pub async fn download_file(&self, sess: &Session, local: &Path, remote: &Path) -> Result<()> {
+        println!(
+            "downloading file: {} --> {}",
+            remote.to_str().unwrap(),
+            local.to_str().unwrap()
+        );
+
+        let (mut remote_file, _) = sess.scp_recv(remote)?;
+        let mut buf = Vec::new();
+        remote_file.read_to_end(&mut buf).unwrap();
+
+        remote_file.send_eof()?;
+        remote_file.wait_eof()?;
+        remote_file.close()?;
+        remote_file.wait_close()?;
+
+        let mut file = std::fs::File::create(local)?;
+        file.write_all(buf.as_slice())?;
         Ok(())
     }
 
@@ -126,5 +162,52 @@ impl GpuServer {
             .unwrap();
         assert!(sess.authenticated());
         sess
+    }
+
+    async fn get_result(&self, sess: &Session, job_id: &str) -> Result<String> {
+        self.wait_for_completion(sess, job_id).await?;
+
+        // print
+        let res = self
+            .exec(
+                sess,
+                format!("cat {}/{}.out", self.remote_dir, job_id).as_str(),
+            )
+            .await?;
+
+        // download
+        self.download_file(
+            sess,
+            &PathBuf::from(format!("{}/{}.out", self.remote_dir, job_id)),
+            &PathBuf::from(format!("{}/output.out", self.resource_dir)),
+        )
+        .await?;
+
+        self.download_file(
+            sess,
+            &PathBuf::from(format!("{}/{}.err", self.remote_dir, job_id)),
+            &PathBuf::from(format!("{}/output.err", self.resource_dir)),
+        )
+        .await?;
+
+        Ok(res)
+    }
+
+    async fn wait_for_completion(&self, sess: &Session, job_id: &str) -> Result<()> {
+        let mut interval = time::interval(time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            if self.check_completion(sess, job_id).await? {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn check_completion(&self, sess: &Session, job_id: &str) -> Result<bool> {
+        let result = self
+            .exec(sess, format!("squeue -o %T -j {}", job_id).as_str())
+            .await?;
+        Ok(result.contains("COMPLETED") || result.contains("FAILED"))
     }
 }

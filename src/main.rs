@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate scan_fmt;
+
 use anyhow::Result;
 
 use crate::server::GpuServer;
