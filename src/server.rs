@@ -15,6 +15,7 @@ pub struct GpuServer {
     pub resource_dir: String,
     pub code_file_name: String,
     pub remote_dir: String,
+    pub compile_script: String,
 }
 
 impl GpuServer {
@@ -32,7 +33,29 @@ impl GpuServer {
                     env::var("JOB_NAME").unwrap()
                 )
             }),
+            compile_script: env::var("COMPILE_SCRIPT").unwrap_or_else(|_| "make".to_string()),
         }
+    }
+
+    pub async fn run(&self, login: &Session, data: &Session) -> Result<()> {
+        self.exec(login, "ls").await?;
+        self.upload_resources(data).await?;
+        self.exec(
+            login,
+            format!(
+                "unzip -o -d {remote} {remote}/{zip}",
+                remote = self.remote_dir,
+                zip = self.code_file_name
+            )
+            .as_str(),
+        )
+        .await?;
+        self.exec(
+            login,
+            format!("cd {} && {}", self.remote_dir, self.compile_script.as_str()).as_str(),
+        )
+        .await?;
+        Ok(())
     }
 
     pub async fn connect(&self, login_addr: &str, data_addr: &str) -> (Session, Session) {
@@ -41,9 +64,10 @@ impl GpuServer {
         (login, data)
     }
 
-    pub async fn exec(&self, sess: &Session, cmd: String) -> Result<String> {
+    pub async fn exec(&self, sess: &Session, cmd: &str) -> Result<String> {
+        println!("exec: {}", cmd);
         let mut channel = sess.channel_session().unwrap();
-        channel.exec(cmd.as_str())?;
+        channel.exec(cmd)?;
         let mut s = String::new();
         channel.read_to_string(&mut s)?;
         println!("{}", s);
@@ -52,6 +76,11 @@ impl GpuServer {
     }
 
     pub async fn upload_file(&self, sess: &Session, local: &Path, remote: &Path) -> Result<()> {
+        println!(
+            "uploading file: {} --> {}",
+            local.to_str().unwrap(),
+            remote.to_str().unwrap()
+        );
         let result = fs::read(local)?;
         let mut remote_file = sess.scp_send(remote, 0o644, result.len() as u64, None)?;
         remote_file.write_all(&result).unwrap();
