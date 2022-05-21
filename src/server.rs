@@ -29,7 +29,8 @@ impl GpuServer {
             code_file_name: env::var("CODE_FILE_NAME").unwrap_or_else(|_| "gpu.zip".to_string()),
             remote_dir: env::var("REMOTE_DIR").unwrap_or_else(|_| {
                 format!(
-                    "/lustre/home/acct-stu/{}/{}",
+                    "/lustre/home/{}/{}/{}",
+                    env::var("ACCOUNT").unwrap_or_else(|_| "acct-stu".to_string()),
                     env::var("USERNAME").unwrap(),
                     env::var("JOB_NAME").unwrap()
                 )
@@ -68,7 +69,7 @@ impl GpuServer {
             .await?;
         let job_id = scan_fmt!(job_id.as_str(), "Submitted batch job {}", String)?;
         // wait for the result
-        let res = self.get_result(login, job_id.as_str()).await?;
+        let res = self.get_result(login, data, job_id.as_str()).await?;
 
         Ok(res)
     }
@@ -164,27 +165,27 @@ impl GpuServer {
         sess
     }
 
-    async fn get_result(&self, sess: &Session, job_id: &str) -> Result<String> {
-        self.wait_for_completion(sess, job_id).await?;
+    async fn get_result(&self, login: &Session, data: &Session, job_id: &str) -> Result<String> {
+        self.wait_for_completion(login, job_id).await?;
 
         // print
         let res = self
             .exec(
-                sess,
+                login,
                 format!("cat {}/{}.out", self.remote_dir, job_id).as_str(),
             )
             .await?;
 
         // download
         self.download_file(
-            sess,
+            data,
             &PathBuf::from(format!("{}/{}.out", self.remote_dir, job_id)),
             &PathBuf::from(format!("{}/output.out", self.resource_dir)),
         )
         .await?;
 
         self.download_file(
-            sess,
+            data,
             &PathBuf::from(format!("{}/{}.err", self.remote_dir, job_id)),
             &PathBuf::from(format!("{}/output.err", self.resource_dir)),
         )
