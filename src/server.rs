@@ -99,7 +99,7 @@ impl GpuServer {
         let result = fs::read(local)?;
         let mut remote_file = sess.scp_send(remote, 0o644, result.len() as u64, None)?;
         remote_file.write_all(&result)?;
-        // Close the channel and wait for the whole content to be tranferred
+        // Close the channel and wait for the whole content to be transferred
         remote_file.send_eof()?;
         remote_file.wait_eof()?;
         remote_file.close()?;
