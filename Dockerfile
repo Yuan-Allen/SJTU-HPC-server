@@ -1,3 +1,10 @@
+FROM minik8s.xyz/rust:latest AS builder
+WORKDIR /root/src
+COPY . .
+RUN cargo build --release
+CMD ["gpu_server"]
+
 FROM ubuntu:latest
-COPY ./target/release/ /gpu_server/
-RUN apt update && apt install -y openssl libssl-dev
+WORKDIR /root/
+COPY --from=builder /root/src/target/release/gpu_server ./
+CMD ["./gpu_server"]
