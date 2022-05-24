@@ -209,6 +209,9 @@ impl GpuServer {
         let result = self
             .exec(sess, format!("squeue -o %T -j {}", job_id).as_str())
             .await?;
-        Ok(result.contains("COMPLETED") || result.contains("FAILED"))
+        Ok(!result.contains("PENDING")
+            && !result.contains("RUNNING")
+            && !result.contains("CONFIGURING")
+            && !result.contains("COMPLETING"))
     }
 }
