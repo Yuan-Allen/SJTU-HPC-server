@@ -179,15 +179,15 @@ impl GpuServer {
         // download
         self.download_file(
             data,
-            &PathBuf::from(format!("{}/{}.out", self.remote_dir, job_id)),
             &PathBuf::from(format!("{}/output.out", self.resource_dir)),
+            &PathBuf::from(format!("{}/{}.out", self.remote_dir, job_id)),
         )
         .await?;
 
         self.download_file(
             data,
-            &PathBuf::from(format!("{}/{}.err", self.remote_dir, job_id)),
             &PathBuf::from(format!("{}/output.err", self.resource_dir)),
+            &PathBuf::from(format!("{}/{}.err", self.remote_dir, job_id)),
         )
         .await?;
 
@@ -195,7 +195,7 @@ impl GpuServer {
     }
 
     async fn wait_for_completion(&self, sess: &Session, job_id: &str) -> Result<()> {
-        let mut interval = time::interval(time::Duration::from_secs(60));
+        let mut interval = time::interval(time::Duration::from_secs(30));
         loop {
             interval.tick().await;
             if self.check_completion(sess, job_id).await? {
