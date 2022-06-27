@@ -25,7 +25,7 @@ Or you can just directly run this program with environment variables.
 
 ## Usage
 
-You need to sse environment variables to specify these parameters.
+You need to use environment variables to specify these parameters.
 - Required
   - USERNAME: Your HPC username.
   - PASSWORD: Your HPC password.
